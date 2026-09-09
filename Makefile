@@ -27,3 +27,6 @@ count:
 
 report:
 	uv run python scripts/generate_report.py
+
+elt:
+	uv run python scripts/elt_pipeline.py
