@@ -30,3 +30,6 @@ report:
 
 elt:
 	uv run python scripts/elt_pipeline.py
+
+duckdb:
+	uv run python scripts/duckdb_taxi_bench.py
