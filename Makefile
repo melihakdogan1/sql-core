@@ -24,3 +24,6 @@ count:
 	SELECT 'shipments', count(*) from shipments union all \
 	SELECT 'reviews', count(*) from reviews union all \
 	SELECT 'inventory_movements', count(*) from inventory_movements;"
+
+report:
+	uv run python scripts/generate_report.py
