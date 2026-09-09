@@ -1,5 +1,4 @@
--- Dimensional Model (Star Schema)
-
+-- Dim Date
 CREATE TABLE IF NOT EXISTS dim_date (
     date_id INT PRIMARY KEY,
     full_date DATE NOT NULL UNIQUE,
@@ -12,16 +11,21 @@ CREATE TABLE IF NOT EXISTS dim_date (
     is_weekend BOOLEAN NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS dim_users (
-    user_key SERIAL PRIMARY KEY,
-    user_id INT NOT NULL UNIQUE,
+-- Dim Customer with SCD Type 2
+CREATE TABLE IF NOT EXISTS dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
     email VARCHAR(255) NOT NULL,
     full_name VARCHAR(150) NOT NULL,
     city VARCHAR(100),
-    registration_date DATE NOT NULL
+    valid_from TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    valid_to TIMESTAMP WITHOUT TIME ZONE,
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
 );
+CREATE INDEX IF NOT EXISTS idx_dim_customer_lookup ON dim_customer(user_id, is_current);
 
-CREATE TABLE IF NOT EXISTS dim_products (
+-- Dim Product
+CREATE TABLE IF NOT EXISTS dim_product (
     product_key SERIAL PRIMARY KEY,
     product_id INT NOT NULL UNIQUE,
     sku VARCHAR(64) NOT NULL,
@@ -31,26 +35,29 @@ CREATE TABLE IF NOT EXISTS dim_products (
     unit_price NUMERIC(10, 2) NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS dim_coupons (
-    coupon_key SERIAL PRIMARY KEY,
-    coupon_id INT NOT NULL UNIQUE,
-    code VARCHAR(50) NOT NULL,
-    discount_pct NUMERIC(5, 2) NOT NULL,
-    max_discount_amount NUMERIC(10, 2) NOT NULL
+-- Fact Orders (Grain: 1 satır = 1 tamamlanan/işlenen sipariş)
+CREATE TABLE IF NOT EXISTS fct_orders (
+    order_key SERIAL PRIMARY KEY,
+    order_id INT NOT NULL UNIQUE,
+    customer_key INT NOT NULL REFERENCES dim_customer(customer_key),
+    order_date_id INT NOT NULL REFERENCES dim_date(date_id),
+    order_status VARCHAR(20) NOT NULL,
+    total_amount NUMERIC(12, 2) NOT NULL,
+    discount_amount NUMERIC(10, 2) NOT NULL,
+    delivery_days INT
 );
 
-CREATE TABLE IF NOT EXISTS fact_sales (
-    sale_id SERIAL PRIMARY KEY,
+-- Fact Order Items (Grain: 1 satır = 1 sipariş içindeki tekil ürün kalemi)
+CREATE TABLE IF NOT EXISTS fct_order_items (
+    order_item_key SERIAL PRIMARY KEY,
     order_id INT NOT NULL,
-    date_id INT NOT NULL REFERENCES dim_date(date_id),
-    user_key INT NOT NULL REFERENCES dim_users(user_key),
-    product_key INT NOT NULL REFERENCES dim_products(product_key),
-    coupon_key INT REFERENCES dim_coupons(coupon_key),
+    order_date_id INT NOT NULL REFERENCES dim_date(date_id),
+    customer_key INT NOT NULL REFERENCES dim_customer(customer_key),
+    product_key INT NOT NULL REFERENCES dim_product(product_key),
     quantity INT NOT NULL,
     unit_price NUMERIC(10, 2) NOT NULL,
-    subtotal NUMERIC(12, 2) NOT NULL,
     cost_amount NUMERIC(12, 2) NOT NULL,
+    subtotal NUMERIC(12, 2) NOT NULL,
     gross_margin NUMERIC(12, 2) NOT NULL,
-    order_status VARCHAR(20) NOT NULL,
-    delivery_duration_days INT
+    CONSTRAINT uq_order_product UNIQUE (order_id, product_key)
 );

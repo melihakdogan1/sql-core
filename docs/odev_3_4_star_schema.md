@@ -1,52 +1,31 @@
-# Ödev 3.4 — Veri Ambarı Modellemesi (Star Schema) Raporu
+# Ödev 3.4 — Star Schema Analitik Katman ve Performans Raporu
 
-## 1. Mimari Tasarım (Grain & Şema)
-- **Fact Tablosu:** `fact_sales` (Grain: Sipariş içerisindeki tekil ürün kalemi satırı).
-- **Dimension Tabloları:** `dim_date`, `dim_users`, `dim_products`, `dim_coupons`.
-- **Önceden Hesaplanmış Metrikler (Pre-aggregated Metrics):** `cost_amount`, `gross_margin`, `delivery_duration_days`.
+## 1. Grain Tanımları
 
----
-
-## 2. OLTP vs. Star Schema Karşılaştırması
-
-### Senaryo: Yıl/Çeyrek Bazında Kategori Kârlılık Analizi
-
-#### A) OLTP Sorgusu (6 Tablo Join)
-```sql
-SELECT 
-    c.name AS category_name,
-    EXTRACT(YEAR FROM o.order_date) AS order_year,
-    EXTRACT(QUARTER FROM o.order_date) AS order_quarter,
-    ROUND(SUM(oi.subtotal), 2) AS total_revenue,
-    ROUND(SUM(oi.subtotal - (oi.quantity * p.cost)), 2) AS total_profit
-FROM orders o
-JOIN order_items oi ON o.order_id = oi.order_id
-JOIN products p ON oi.product_id = p.product_id
-JOIN categories c ON p.category_id = c.category_id
-WHERE o.order_status = 'completed'
-GROUP BY c.name, EXTRACT(YEAR FROM o.order_date), EXTRACT(QUARTER FROM o.order_date)
-ORDER BY total_profit DESC;
-```
-
-#### B) Star Schema Sorgusu (Sadece 2 Join + Basit Gruplama)
-```sql
-SELECT 
-    dp.category_name,
-    dd.year,
-    dd.quarter,
-    ROUND(SUM(fs.subtotal), 2) AS total_revenue,
-    ROUND(SUM(fs.gross_margin), 2) AS total_profit
-FROM fact_sales fs
-JOIN dim_products dp ON fs.product_key = dp.product_key
-JOIN dim_date dd ON fs.date_id = dd.date_id
-WHERE fs.order_status = 'completed'
-GROUP BY dp.category_name, dd.year, dd.quarter
-ORDER BY total_profit DESC;
-```
+- **`fct_orders` Grain:** 1 satır = 1 tekil siparişi temsil eder (Sipariş toplam tutarı, statüsü, indirim ve kargo süresi).
+- **`fct_order_items` Grain:** 1 satır = 1 sipariş içindeki tekil ürün kalemini temsil eder (Adet, birim fiyat, satır kâr marjı).
+- **`dim_customer` (SCD Type 2):** `valid_from`, `valid_to`, `is_current` bayraklarıyla müşterinin siparişi verdiği andaki özniteliklerini (ör. o tarihteki şehri) tarihsel olarak korur.
 
 ---
 
-## 3. Elde Edilen Avantajlar
-1. **Join Karmaşıklığının Azalması:** 6 tabloluk iç içe JOIN zinciri, olgu tablosundan boyutlara tek adımlı JOIN'lere indirgendi.
-2. **Hesaplama Yükünün Önceden Alınması:** `gross_margin` ve teslimat süreleri ETL sırasında hesaplandığı için her BI/Dashboard sorgusunda satır başı çarpma/çıkarma maliyeti ortadan kalktı.
-3. **Takvim Analitiği Kolaylığı:** `dim_date` sayesinde `EXTRACT` ve tarih fonksiyonları yerine doğrudan indeksli tamsayı (`date_id`) ve çeyrek/hafta sonu bayrakları üzerinden anlık filtreleme sağlandı.
+## 2. OLTP vs. Star Schema 10 Soru Süre Kıyaslama Tablosu
+
+| # | Soru / Analiz | OLTP Süre | Star Schema Süre | Hızlanma |
+|---|---|---|---|---|
+| 1 | Aylık Ciro ve Büyüme (MoM) | 50.53 ms | 28.06 ms | **1.8x** |
+| 2 | Kategori Bazında Toplam Kâr (Gross Margin) | 135.33 ms | 126.01 ms | **1.07x** |
+| 3 | Hafta Sonu vs Hafta İçi Satış Analizi | 55.21 ms | 22.25 ms | **2.48x** |
+| 4 | Şehirlere Göre Müşteri Ciro Dağılımı (SCD2 Duyarlı) | 61.48 ms | 55.45 ms | **1.11x** |
+| 5 | En Çok Satan İlk 5 Ürün (Adet Bazında) | 53.74 ms | 84.67 ms | **0.63x** |
+| 6 | Ortalama Teslimat Süresi | 21.23 ms | 11.53 ms | **1.84x** |
+| 7 | Çeyrek (Quarter) Bazında Satış Hacmi | 97.50 ms | 24.96 ms | **3.91x** |
+| 8 | Ortalama Sepet Tutarı (AOV) | 19.78 ms | 13.52 ms | **1.46x** |
+| 9 | Kullanıcı Başına Toplam Harcama Dağılımı | 52.30 ms | 41.86 ms | **1.25x** |
+| 10 | Kategori Bazında Satılan Toplam Kalem Sayısı | 47.91 ms | 44.90 ms | **1.07x** |
+
+---
+
+## 3. SCD2 Mantığı ve Idempotent Testi
+
+- **Idempotency:** Pipeline `ON CONFLICT DO UPDATE / NOTHING` mekanizmasıyla inşa edildi. Betik 10 kez arka arkaya çalıştırılsa dahi yinelenen satır üretmez.
+- **SCD2 Geçerlilik:** 1-100 ID'li kullanıcıların şehirleri simülasyonla güncellendiğinde, eski siparişlerin eski şehre (`valid_to` dolmuş pasif kayıt), yeni siparişlerin güncel şehre (`is_current = TRUE`) bağlandığı doğrulandı.
